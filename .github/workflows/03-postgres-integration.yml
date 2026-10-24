@@ -15,6 +15,8 @@ concurrency:
 
 jobs:
   postgres-integration:
+    # Keep the existing RC1/AUTH-D rehearsal separate from the full-chain lab.
+    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.head_ref != 'fix/schema-recovery-staging') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 
@@ -124,6 +126,111 @@ jobs:
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4 series immutable SHA
         with:
           name: orkio-backend-postgres-ci-evidence
+          path: build-evidence/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  # Independent, non-destructive-to-Railway, fresh-schema laboratory.
+  # The default-branch copy of THIS workflow already supports workflow_dispatch;
+  # dispatching its fix-branch revision can use the normal Actions branch selector.
+  postgres-fresh-001-016:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/fix/schema-recovery-staging' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: patroai_ci
+          POSTGRES_PASSWORD: patroai_ci_password
+          POSTGRES_DB: patroai_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U patroai_ci -d patroai_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      CI: "true"
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONPATH: "src"
+      PLATFORM_ENVIRONMENT: "test"
+      PLATFORM_AUTH_MODE: "test"
+      PLATFORM_INVITATION_TOKEN_SECRET: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      DATABASE_URL: "postgresql+psycopg://patroai_ci:patroai_ci_password@127.0.0.1:5432/patroai_ci"
+
+    steps:
+      - name: Checkout candidate branch without persistent Git credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: requirements-test.lock.txt
+
+      - name: Check action pinning
+        run: python scripts/check_workflow_action_pinning.py
+
+      - name: Install frozen Python test dependencies by hash
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python -m pip install --require-hashes -r requirements-test.lock.txt
+          python -m pip check
+
+      - name: Validate static migration candidate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p build-evidence
+          python -m pytest tests/test_schema_recovery_proposal_static.py \
+            --junitxml=build-evidence/schema-recovery-static.xml
+
+      - name: Rehearse PostgreSQL migrations 001 through 016 (no reset)
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p build-evidence
+          python scripts/schema_recovery_full_chain_ci.py \
+            | tee build-evidence/postgres-fresh-001-016.jsonl
+
+      - name: Capture provenance without secrets
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p build-evidence
+          {
+            printf 'workflow=%s\n' "$GITHUB_WORKFLOW"
+            printf 'repository=%s\n' "$GITHUB_REPOSITORY"
+            printf 'event=%s\n' "$GITHUB_EVENT_NAME"
+            printf 'ref=%s\n' "$GITHUB_REF"
+            printf 'commit=%s\n' "$GITHUB_SHA"
+            printf 'run=%s\n' "$GITHUB_RUN_ID"
+            python --version
+          } > build-evidence/postgres-fresh-provenance.txt
+          sha256sum \
+            .github/workflows/03-postgres-integration.yml \
+            scripts/schema_recovery_full_chain_ci.py \
+            requirements-test.lock.txt \
+            > build-evidence/postgres-fresh-file-sha256.txt
+
+      - name: Retain safe CI evidence
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882
+        with:
+          name: efata777-fresh-postgres-001-016
           path: build-evidence/
           if-no-files-found: error
           retention-days: 14
