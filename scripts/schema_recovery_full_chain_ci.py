@@ -134,6 +134,10 @@ def preflight() -> sa.Engine:
     require(effective == raw, "ALEMBIC_EFFECTIVE_TARGET_MISMATCH")
     engine = sa.create_engine(raw, pool_pre_ping=True)
     with engine.connect() as connection:
+        pg_version = connection.execute(
+            sa.text("SELECT current_setting('server_version_num')::integer")
+        ).scalar_one()
+        require(160000 <= pg_version < 170000, "POSTGRESQL_MAJOR_NOT_16")
         name, username = connection.execute(
             sa.text("SELECT current_database(), current_user")
         ).one()
@@ -147,7 +151,7 @@ def preflight() -> sa.Engine:
                 "CONNECTED_TO_UNEXPECTED_DATABASE")
         require(count == 0, "DATABASE_NOT_EMPTY")
     emit("preflight", "PASS", database="patroai_ci", host="127.0.0.1",
-         fresh_database=True, source_hashes=len(SOURCE_HASHES))
+         fresh_database=True, postgresql_major=16, source_hashes=len(SOURCE_HASHES))
     return engine
 
 
@@ -274,6 +278,34 @@ def migrate(revision: str) -> None:
         )
 
 
+def preserve_failure_catalog(engine: sa.Engine) -> None:
+    """Read-only, bounded failure evidence from the ephemeral CI database."""
+    try:
+        inspector = sa.inspect(engine)
+        present = set(inspector.get_table_names(schema="public"))
+        revision = None
+        with engine.connect() as conn:
+            if "alembic_version" in present:
+                versions = conn.execute(sa.text(
+                    "SELECT version_num FROM public.alembic_version LIMIT 2"
+                )).scalars().all()
+                revision = versions[0] if len(versions) == 1 else "INVALID_VERSION_ROWS"
+            index_rows = conn.execute(sa.text("""
+                SELECT i.indisvalid, i.indisready
+                FROM pg_catalog.pg_index i
+                JOIN pg_catalog.pg_class ix ON ix.oid = i.indexrelid
+                JOIN pg_catalog.pg_namespace n ON n.oid=ix.relnamespace
+                WHERE n.nspname='public'
+                  AND ix.relname='uq_users_email_normalized'
+            """)).all()
+        emit("failure_catalog", "RECORDED", alembic_revision=revision,
+             table_count=len(present),
+             email_index=[{"valid": bool(row[0]), "ready": bool(row[1])}
+                          for row in index_rows[:2]])
+    except Exception as exc:
+        emit("failure_catalog", "NOT_PROVEN", error_type=type(exc).__name__)
+
+
 def main() -> int:
     engine = None
     try:
@@ -294,6 +326,8 @@ def main() -> int:
         # Failure on an ephemeral CI DB only: keep its state for job lifetime.
         reason = str(exc)[:300] if isinstance(exc, RuntimeError) and str(exc).startswith(STOP) else f"UNEXPECTED_EXCEPTION:{type(exc).__name__}"
         emit("full_chain", "STOP", reason=reason)
+        if engine is not None:
+            preserve_failure_catalog(engine)
         return 1
     finally:
         if engine is not None:
