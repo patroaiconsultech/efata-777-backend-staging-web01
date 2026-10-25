@@ -235,3 +235,44 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
+
+  # Docker build laboratory; the default-branch workflow already allows manual dispatch.
+  # This job cannot connect to Railway (no secrets, no Railway endpoint variables).
+  docker-recovery-runner-qualification:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/fix/schema-recovery-staging' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout candidate branch without persistent credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Verify Docker and candidate files
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p ci/recovery_docker_qualification/evidence
+          docker info >/dev/null
+          bash -n ci/recovery_docker_qualification/qualify_exact_checkout_docker.sh
+          test "$GITHUB_REF" = "refs/heads/fix/schema-recovery-staging"
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+          test -f ci/recovery_docker_qualification/SHA256SUMS.txt
+
+      - name: Qualify exact pinned checkout, actual Docker image and fail-closed smoke
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash ci/recovery_docker_qualification/qualify_exact_checkout_docker.sh
+
+      - name: Keep build and runtime evidence (no Railway credentials)
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4
+        with:
+          name: efata777-docker-recovery-qualification
+          path: ci/recovery_docker_qualification/evidence/
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0
