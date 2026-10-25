@@ -75,9 +75,17 @@ docker build --progress=plain --no-cache \
 echo "DOCKER_BUILD=PASS" >> "$EVIDENCE_DIR/summary.txt"
 
 echo "TEST_REAL_MODULE_OFFLINE"
+# Git checkout was created with umask 077; its test directory is not
+# traversable by the non-root image UID (10001) when bind-mounted.
+# Expose read/traverse permission only on the DISPOSABLE checkout tests.
+# Keep the image non-root, the mount read-only, and the network disabled.
+chmod -R a+rX "$WORK_TREE/tests"
+# One of the 17 contract tests inspects this review-only Dockerfile;
+# provide it read-only instead of adding test files to the runtime image.
 docker run --rm --network none --read-only \
   --cap-drop ALL --security-opt no-new-privileges \
   --volume "$WORK_TREE/tests:/app/tests:ro" \
+  --volume "$WORK_TREE/Dockerfile.recovery-qualification:/app/Dockerfile.recovery-qualification:ro" \
   --entrypoint python "$IMAGE" \
   -m unittest discover -s tests -p test_railway_recovery_runner_real_backend.py -v \
   > "$EVIDENCE_DIR/real-module-tests.log" 2>&1 || {
