@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import json
@@ -58,6 +59,8 @@ def _catalog_profile(agent_id: str, locale: str, settings: Settings, *, delivery
         return None
     if assignment.validation_status != "VALIDATED":
         raise VoiceBindingError("VOICE_PROFILE_NOT_VALIDATED", validation_scope="admin_assignment")
+    if delivery_mode not in set(assignment.delivery_modes or []):
+        raise VoiceBindingError("VOICE_DELIVERY_MODE_NOT_SUPPORTED")
     entry = db.get(VoiceCatalogEntry, assignment.voice_catalog_id)
     if entry is None or not entry.active or entry.curation_status != "APPROVED" or locale not in set(entry.supported_locales or []) or delivery_mode not in set(entry.delivery_modes or []):
         raise VoiceBindingError("VOICE_PROVIDER_NOT_AVAILABLE")
@@ -101,6 +104,8 @@ def tenant_has_eligible_voice_output(
         if locale not in set(entry.supported_locales or []):
             continue
         if delivery_mode not in set(entry.delivery_modes or []):
+            continue
+        if delivery_mode not in set(assignment.delivery_modes or []):
             continue
         return True
     return False
