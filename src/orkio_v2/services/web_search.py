@@ -29,7 +29,7 @@ from .activation_rate_limit import (
 _LOG = logging.getLogger("orkio_v2.web_search")
 _BRAVE_URL = "https://api.search.brave.com/res/v1/llm/context"
 _PREFIX = re.compile(
-    r"^\s*(?:por\s+favor[,:\s]+)?(?:pesquise|busque|procure|consulte)\b",
+    r"^\s*(?:por\s+favor[,:\s]+)?(?:pesquise|busque|procure|consulte|fa[cç]a\s+(?:uma\s+)?pesquisa|realize\s+(?:uma\s+)?pesquisa)\b",
     re.IGNORECASE,
 )
 _WEB_WORD = re.compile(r"\b(?:internet|web|online|not[ií]cias?\s+de\s+hoje|fontes?\s+atuais)\b", re.I)

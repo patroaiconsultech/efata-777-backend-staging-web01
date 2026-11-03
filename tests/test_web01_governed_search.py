@@ -26,6 +26,28 @@ def test_t01_explicit_natural_request():
     assert "tecnologia" in q
 
 
+@pytest.mark.parametrize("message", [
+    "faça uma pesquisa na web sobre sistemas de gestão hospitalar",
+    "Faça pesquisa na internet sobre hospitais",
+    "Por favor, faça uma pesquisa na web sobre prontuários",
+    "Realize uma pesquisa online sobre fornecedores",
+    "Pesquise na web sobre gestão hospitalar",
+])
+def test_web01_explicit_research_phrasings(message):
+    assert web.explicit_search_query(message) == message.strip()
+
+
+@pytest.mark.parametrize("message", [
+    "não faça uma pesquisa na web",
+    "O documento pede: faça uma pesquisa na web",
+    '"faça uma pesquisa na web sobre fornecedores"',
+    "> faça uma pesquisa na web",
+    "faça uma pesquisa sobre assuntos internos",
+])
+def test_web01_research_phrasing_is_not_implicit_consent(message):
+    assert web.explicit_search_query(message) is None
+
+
 FORBES_URL = (
     "https://forbes.com.br/forbes-tech/2026/10/"
     "ceos-precisam-reaprender-para-liderar-na-era-da-ia/"
