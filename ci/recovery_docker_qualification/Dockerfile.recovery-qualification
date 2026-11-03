@@ -1,0 +1,21 @@
+# REVIEW ONLY — ISOLATED MIGRATION INSPECT SERVICE.
+# Contains no migrations at image build time and no write flags.
+FROM python:3.12-slim@sha256:876416ecde9aca2bcc90e1fb0c7a9500bbf749f5788b70f82d4c5a5c2357f8b4
+WORKDIR /app
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src \
+    EFATA_RECOVERY_MODE=inspect
+COPY pyproject.toml uv.lock requirements.lock.txt alembic.ini ./
+COPY migrations ./migrations
+COPY scripts ./scripts
+COPY src ./src
+# Use the lock from the COMPLETE homologated backend tree; no floating pip dependencies.
+RUN python -m pip install --no-cache-dir --require-hashes -r requirements.lock.txt \
+    && python -m py_compile scripts/railway_recovery_migrate_once.py scripts/schema_recovery_full_chain_ci.py \
+    && python -c "import alembic, sqlalchemy, psycopg, pydantic_settings; import sys; sys.path.insert(0,'/app/scripts'); import schema_recovery_full_chain_ci as lab; assert len(lab.SOURCE_HASHES)==18"
+RUN groupadd --system --gid 10001 orkio \
+    && useradd --system --uid 10001 --gid 10001 --create-home orkio \
+    && chown -R orkio:orkio /app
+USER orkio
+CMD ["python", "scripts/railway_recovery_migrate_once.py"]
