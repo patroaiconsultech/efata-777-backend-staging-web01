@@ -487,7 +487,7 @@ def build_document_context(
     if visible_since is not None:
         query = query.where(Attachment.created_at >= visible_since)
     rows = db.scalars(
-        query.order_by(Attachment.created_at.asc(), Attachment.id.asc())
+        query.order_by(Attachment.created_at.desc(), Attachment.id.desc())
         .limit(settings.document_context_max_files)
     ).all()
     if not rows:
